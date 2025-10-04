@@ -1,1 +1,14 @@
+# fetch_nasa_data.py
+"""
+Fetch NASA Earth observation datasets for energy & mineral mapping
+"""
+import requests
+
+def download_nasa_dataset(url, save_path):
+    response = requests.get(url)
+    with open(save_path, 'wb') as f:
+        f.write(response.content)
+
+if __name__ == "__main__":
+    download_nasa_dataset("https://example-nasa-dataset-link", "data/nasa_dataset.csv")
 
