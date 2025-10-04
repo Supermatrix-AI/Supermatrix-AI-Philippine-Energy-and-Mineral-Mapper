@@ -1,1 +1,14 @@
+// Load dataset
+var dataset = ee.ImageCollection("NASA/GLDAS/V021/NOAH/G025/T3H")
+                .filterDate('2025-01-01', '2025-12-31');
+
+// Select variable, e.g., soil moisture
+var soilMoisture = dataset.select('SoilMoi0_10cm_inst');
+
+// Map over Philippines boundary
+var philippines = ee.FeatureCollection("USDOS/LSIB_SIMPLE/2017")
+                    .filter(ee.Filter.eq('country_na', 'Philippines'));
+
+Map.centerObject(philippines, 5);
+Map.addLayer(soilMoisture.mean().clip(philippines), {min:0, max:0.5}, 'Soil Moisture');
 
