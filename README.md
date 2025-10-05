@@ -1,18 +1,17 @@
-# Supermatrix-AI: Philippine Energy and Mineral Mapper
+# Supermatrix-AI: Philippine Energy & Mineral Mapper
 
-**Description:**  
-This project maps mineral and energy resources in the Philippines using NASA data, NASA partner datasets, and local Philippine datasets. It leverages AI-assisted analysis for resource identification and predictive mapping.
+## Summary
+AI-assisted mapper that fuses NASA & partner Earth Observation datasets to create mineral and energy proxy maps across the Philippines. Outputs: per-pixel proxies (gold, silver, copper, REE, oil/gas, geothermal), MegaFusion composite, hotspot CSV.
 
-**Features:**  
-- Mineral and energy resource mapping (oil, gas, metals)  
-- AI-assisted analysis and prediction  
-- Integration with Google Earth Engine for geospatial visualization  
+## How to run
+1. Open the GEE script gee_scripts/PH_MegaFusion_map.js in Earth Engine Code Editor.
+2. Press Run.
+3. Use Inspector to read pixel values. Use Tasks panel to export maps & CSV.
 
-**Setup Instructions:**  
-1. Install dependencies from `requirements.txt`  
-2. Run scripts in `scripts/` folder  
-3. Use `gee_scripts/` for Earth Engine visualization
+## Files
+- gee_scripts/PH_MegaFusion_map.js — Earth Engine script (main)
+- demo/ — slides or demo video link
+- data/ — placeholder for Philippine datasets (to be uploaded to GEE assets)
 
-**AI Tools Used:**  
-- Python AI libraries for data analysis (TensorFlow, PyTorch)  
-- Google Earth Engine for spatial analysis
+## Notes
+All outputs are proxies. Field validation is required before any operational use.
