@@ -1,241 +1,398 @@
 // ==========================================================
-// Supermatrix-AI: Philippine Energy & Mineral Mapper (working)
-// Focus: Philippines AOI, mineral + energy proxies (gold, silver, copper, REE, oil/gas, geothermal, etc.)
-// Paste into: https://code.earthengine.google.com  -> New Script -> Paste -> Run
-// IMPORTANT: All outputs are PROXIES. Validate with field data.
+// Supermatrix-AI: Philippine Energy & Mineral Mapper (robust)
+// Metals & Energy Proxy Mapping (Gold, Silver, Platinum, Copper, Nickel, Iron)
+// Uses NASA + NASA partner data (safe fallbacks if unavailable).
+// Paste into https://code.earthengine.google.com and Run
+// IMPORTANT: All outputs are PROXIES. Validate with ground truth.
 // ==========================================================
 
 // -----------------------------
-// AOI: Philippines bounding polygon (approx)
-var PH = ee.Geometry.Polygon([
-  [[116.0, 21.0], [127.8, 21.0], [127.8, 4.0], [116.0, 4.0]]
-]);
-Map.centerObject(PH, 6);
+// Utility: check if an asset (image/collection) exists (client-side)
+// -----------------------------
+function assetExists(id) {
+  try {
+    var info = ee.data.getInfo(id);
+    return info !== null;
+  } catch (e) {
+    // asset missing or access denied
+    print('assetExists false for', id, e);
+    return false;
+  }
+}
 
 // -----------------------------
-// Helpers (safe select, normalization)
+// Safe loader: returns an ee.Image (median) or a placeholder constant image
 // -----------------------------
-function safeSelect(img, name){
-  // If band exists -> select it, else return zero image with same name
+function loadCollectionMedianSafe(id, bounds, startDate, endDate, cloudPropName, cloudThreshold) {
+  if (!assetExists(id)) {
+    print('WARNING: asset not available or no access:', id);
+    return ee.Image.constant(0).rename(id.replace(/[^A-Za-z0-9_]/g, '_'));
+  }
+  var col = ee.ImageCollection(id).filterBounds(bounds).filterDate(startDate, endDate);
+  if (cloudPropName && cloudThreshold !== undefined) {
+    try { col = col.filter(ee.Filter.lt(cloudPropName, cloudThreshold)); } catch(e){ /* ignore */ }
+  }
+  // If collection empty -> return constant image (safe)
+  var size = col.size();
+  var img = ee.Image(ee.Algorithms.If(size.gt(0), col.median().clip(bounds), ee.Image.constant(0).rename('empty_' + id.split('/').pop())));
+  return ee.Image(img);
+}
+
+// -----------------------------
+// AOI: Whole Philippines (change to smaller AOI while testing)
+// -----------------------------
+var ph = ee.FeatureCollection("FAO/GAUL/2015/level0")
+            .filter(ee.Filter.eq('ADM0_NAME','Philippines'));
+Map.centerObject(ph, 6);
+Map.addLayer(ph.style({color:'000000', fillColor:'00000000'}), {}, 'Philippines AOI');
+
+// -----------------------------
+// Safe band select: if band missing return constant 0 image with that band name
+// -----------------------------
+function safeSelect(img, bandName, defaultVal) {
+  img = ee.Image(img);
   var names = img.bandNames();
-  var has = names.contains(name);
-  return ee.Image(ee.Algorithms.If(has, img.select([name]), ee.Image(0).rename(name)));
+  var has = names.contains(bandName);
+  var out = ee.Algorithms.If(has, img.select([bandName]), ee.Image.constant(defaultVal === undefined ? 0 : defaultVal).rename(bandName));
+  return ee.Image(out);
 }
 
-function norm01(img, minVal, maxVal){
-  // Normalize an image to 0..1 using optional provided min/max (client side values okay)
-  // Use small region sample to avoid heavy global stats
-  minVal = (minVal === undefined) ?
-    ee.Number(img.reduceRegion(ee.Reducer.percentile([5]), PH, 5000, 1e13).values().get(0)) :
-    ee.Number(minVal);
-  maxVal = (maxVal === undefined) ?
-    ee.Number(img.reduceRegion(ee.Reducer.percentile([95]), PH, 5000, 1e13).values().get(0)) :
-    ee.Number(maxVal);
-  // if min or max are null (empty), return img masked to 0..1 via identity (avoid errors)
-  return ee.Image(ee.Algorithms.If(
-    minVal.eq(null).or(maxVal.eq(null)),
-    img.multiply(0).add(0), // zero image
-    img.subtract(minVal).divide(maxVal.subtract(minVal)).clamp(0,1)
+// -----------------------------
+// Basic normalizers (range-based / safe)
+// -----------------------------
+// For indices that naturally fall in [-1,1] we convert to [0,1].
+function scaleIndexMinusOneToOneTo01(idxImage) {
+  return idxImage.add(1).divide(2).clamp(0,1);
+}
+// Simple divisor-normalize with clamp
+function normalizeBy(img, divisor) {
+  return ee.Image(img).divide(divisor).clamp(0,1);
+}
+
+// -----------------------------
+// 1) Load datasets (safe)
+// -----------------------------
+print('Loading datasets (may show missing-asset warnings)');
+
+// ASTER (VNIR/SWIR)
+var aster = loadCollectionMedianSafe("ASTER/AST_L1T_003", ph, '2000-01-01','2025-10-01');
+
+// Landsat: try LC09 then fallback to LC08
+var landsat9Id = "LANDSAT/LC09/C02/T1_L2";
+var landsat8Id = "LANDSAT/LC08/C02/T1_L2";
+var landsat = loadCollectionMedianSafe(landsat9Id, ph, '2015-01-01','2025-10-01','CLOUD_COVER',60);
+// if landsat contains no sensible bands (placeholder) attempt fallback
+var landsatCheck = landsat.bandNames();
+print('Landsat median bands:', landsatCheck);
+var landsat_is_placeholder = ee.List(landsat.bandNames()).size().eq(0);
+landsat = ee.Image(ee.Algorithms.If(landsat_is_placeholder, loadCollectionMedianSafe(landsat8Id, ph, '2015-01-01','2025-10-01','CLOUD_COVER',60), landsat));
+
+// Sentinel-2
+var s2 = loadCollectionMedianSafe('COPERNICUS/S2_SR', ph, '2020-01-01','2025-10-01','CLOUDY_PIXEL_PERCENTAGE',40);
+
+// EMIT (if available)
+var emit = loadCollectionMedianSafe('NASA/EMIT/SurfaceMineralogy', ph, '2023-01-01','2025-10-01');
+
+// VIIRS, MODIS, GRACE, SMAP
+var viirs = loadCollectionMedianSafe("NOAA/VIIRS/DNB/MONTHLY_V1/VCMSLCFG", ph, '2012-01-01','2025-10-01');
+var modis = loadCollectionMedianSafe('MODIS/006/MOD09GA', ph, '2000-01-01','2025-10-01');
+var grace = loadCollectionMedianSafe("NASA/GRACE/MASS_GRIDS", ph, '2002-01-01','2025-10-01');
+var smap = loadCollectionMedianSafe("NASA_USDA/HSL/SMAP_soil_moisture", ph, '2015-01-01','2025-10-01');
+
+// Global geophysics (may be missing in some accounts)
+var emag2 = assetExists("NOAA/NGDC/EMAG2_2") ? ee.Image("NOAA/NGDC/EMAG2_2").clip(ph) : ee.Image.constant(0).rename('EMAG2_placeholder');
+if (assetExists("NOAA/NGDC/EMAG2_2")) Map.addLayer(emag2, {min:-200,max:200}, 'EMAG2');
+
+// SRTM / ALOS
+var srtm = ee.Image("USGS/SRTMGL1_003").clip(ph);
+var alos = assetExists("JAXA/ALOS/AW3D30_V1_1") ? ee.Image("JAXA/ALOS/AW3D30_V1_1").clip(ph) : ee.Image.constant(0).rename('ALOS_placeholder');
+
+// Sentinel-1 (SAR) median
+var s1col = assetExists('COPERNICUS/S1_GRD') ? ee.ImageCollection('COPERNICUS/S1_GRD').filterBounds(ph).filterDate('2018-01-01','2025-10-01').select(['VV','VH']).median().clip(ph) : ee.Image.constant(0).rename('S1_placeholder');
+if (assetExists('COPERNICUS/S1_GRD')) Map.addLayer(s1col, {min:-25, max:0}, 'Sentinel-1 median');
+
+// GEDI & ECOSTRESS (may be missing)
+var gedi = assetExists("NASA/GEDI/GEDI02_A_002_MONTHLY") ? ee.ImageCollection("NASA/GEDI/GEDI02_A_002_MONTHLY").filterBounds(ph).median().clip(ph) : ee.Image.constant(0).rename('GEDI_placeholder');
+var ecoLST = assetExists("NASA/ECOSTRESS/LST/GERMLST") ? ee.ImageCollection('NASA/ECOSTRESS/LST/GERMLST').filterBounds(ph).median().clip(ph) : ee.Image.constant(0).rename('ECOSTRESS_LST_placeholder');
+var ecoET = assetExists("NASA/ECOSTRESS/EVAPOTRANSPIRATION") ? ee.ImageCollection('NASA/ECOSTRESS/EVAPOTRANSPIRATION').filterBounds(ph).median().clip(ph) : ee.Image.constant(0).rename('ECOSTRESS_ET_placeholder');
+
+Map.addLayer(aster, {bands:['B2','B1','B3N'], min:0, max:300}, 'ASTER (median)');
+Map.addLayer(landsat, {bands:['SR_B4','SR_B3','SR_B2'], min:0, max:3000}, 'Landsat (median)');
+Map.addLayer(s2, {bands:['B4','B3','B2'], min:0, max:3000}, 'Sentinel-2 (median)');
+Map.addLayer(srtm, {min:0, max:1500}, 'SRTM DEM');
+
+// -----------------------------
+// 2) Build safe band images for indices
+// -----------------------------
+// Landsat SR bands names used: SR_B2..SR_B7
+var L_red = safeSelect(landsat, 'SR_B4', 0);
+var L_green = safeSelect(landsat, 'SR_B3', 0);
+var L_blue = safeSelect(landsat, 'SR_B2', 0);
+var L_nir = safeSelect(landsat, 'SR_B5', 0);
+var L_sw1 = safeSelect(landsat, 'SR_B6', 0);
+var L_sw2 = safeSelect(landsat, 'SR_B7', 0);
+
+// ASTER bands
+var AST_B1 = safeSelect(aster, 'B1', 0);
+var AST_B2 = safeSelect(aster, 'B2', 0);
+var AST_B3N = safeSelect(aster, 'B3N', 0);
+
+// EMIT aggregated mean (if image has bands)
+var emitMean = (function(){
+  var bn = emit.bandNames();
+  bn = ee.List(bn);
+  var size = bn.size();
+  return ee.Image( ee.Algorithms.If(size.gt(0),
+    // average of bands (reduce by sum then divide)
+    emit.reduce(ee.Reducer.mean()).rename('EMIT_mean'),
+    ee.Image.constant(0).rename('EMIT_mean')
   ));
+})();
+
+// VIIRS normalizer
+var viirsNorm = normalizeBy(viirs, 60);
+
+// EMAG2 abs normalized (use 200 nT as a sensible scale)
+var magAbs = normalizeBy(emag2.abs(), 200);
+
+// GEDI rh100 normalized (0-100)
+var gediRh100 = normalizeBy(safeSelect(gedi, 'rh100', 0), 100);
+
+// ECOSTRESS LST normalized (rough: 250-330K)
+var ecoN = ee.Image(ee.Algorithms.If(
+  ecoLST.bandNames().size().gt(0),
+  ecoLST.subtract(250).divide(80).clamp(0,1),
+  ee.Image.constant(0)
+)).rename('ECOSTRESS_norm');
+
+// Slope normalized
+var slope = ee.Terrain.slope(srtm).divide(45).clamp(0,1).rename('slope_norm');
+
+// -----------------------------
+// 3) Compute spectral indices safely (map to 0..1)
+// -----------------------------
+function safeIndexRatio(a,b) {
+  // compute (a-b)/(a+b) safely
+  var num = a.subtract(b);
+  var den = a.add(b).add(1e-6);
+  var idx = num.divide(den);
+  return scaleIndexMinusOneToOneTo01(idx);
 }
 
-// -----------------------------
-// 1) Ingest core datasets (safe, widely available)
-// -----------------------------
-// ASTER (may have different band names in catalog: B01... B14)
-var asterCol = ee.ImageCollection("ASTER/AST_L1T_003").filterBounds(PH).select(['B02','B01','B3N']); // try common names
-var aster = ee.Image(0);
-aster = ee.Algorithms.If(asterCol.size().gt(0), asterCol.median().clip(PH), aster);
+// IOI (iron-oxide index) using Red & Green
+var IOI = safeIndexRatio(L_red, L_green).rename('IOI');
+Map.addLayer(IOI, {min:0, max:1}, 'IOI (iron oxide proxy)');
 
-// Landsat (LC08/LC09 L2 SR)
-var landsatCol = ee.ImageCollection("LANDSAT/LC08/C02/T1_L2")
-  .merge(ee.ImageCollection("LANDSAT/LC09/C02/T1_L2"))
-  .filterBounds(PH)
-  .filterDate('2018-01-01', '2025-12-31')
-  .map(function(img){
-    // simple QA mask for SR; if QA_PIXEL present
-    var qa = img.select('QA_PIXEL');
-    return ee.Algorithms.If(qa, img.updateMask(qa.bitwiseAnd(1<<3).eq(0).and(qa.bitwiseAnd(1<<4).eq(0))), img);
+// Clay index (SWIR)
+var Clay = safeIndexRatio(L_sw1, L_sw2).rename('Clay');
+Map.addLayer(Clay, {min:0, max:1}, 'Clay (SWIR proxy)');
+
+// Carbonate-like proxy
+var Carb = safeIndexRatio(L_sw2, L_nir).rename('Carbonate');
+Map.addLayer(Carb, {min:0, max:1}, 'Carbonate proxy');
+
+// ASTER iron proxy (B2-B1)/(B2+B1)
+var AST_Iron_raw = AST_B2.subtract(AST_B1).divide(AST_B2.add(AST_B1).add(1e-6));
+var AST_Iron = scaleIndexMinusOneToOneTo01(AST_Iron_raw).rename('AST_Iron');
+Map.addLayer(AST_Iron, {min:0, max:1}, 'ASTER Iron proxy');
+
+// -----------------------------
+// 4) Metal proxy compositions (heuristic weights)
+// -----------------------------
+// We use linear weighted combos of the normalized proxies above.
+// These are starting heuristics and must be validated with ground truth.
+var GoldProxy = IOI.multiply(0.25)
+  .add(Clay.multiply(0.20))
+  .add(AST_Iron.multiply(0.10))
+  .add(magAbs.multiply(0.20))
+  .add(slope.multiply(0.05))
+  .add(gediRh100.multiply(0.10))
+  .add(ecoN.multiply(0.10))
+  .rename('GoldProxy').clamp(0,1);
+
+var SilverProxy = IOI.multiply(0.20)
+  .add(Carb.multiply(0.20))
+  .add(AST_Iron.multiply(0.15))
+  .add(magAbs.multiply(0.15))
+  .add(slope.multiply(0.10))
+  .add(gediRh100.multiply(0.10))
+  .add(ecoN.multiply(0.10))
+  .rename('SilverProxy').clamp(0,1);
+
+var PlatinumProxy = IOI.multiply(0.15)
+  .add(Clay.multiply(0.10))
+  .add(AST_Iron.multiply(0.20))
+  .add(magAbs.multiply(0.25))
+  .add(slope.multiply(0.10))
+  .add(gediRh100.multiply(0.10))
+  .add(ecoN.multiply(0.10))
+  .rename('PlatinumProxy').clamp(0,1);
+
+var CopperProxy = IOI.multiply(0.20)
+  .add(Clay.multiply(0.15))
+  .add(AST_Iron.multiply(0.20))
+  .add(magAbs.multiply(0.20))
+  .add(slope.multiply(0.10))
+  .add(gediRh100.multiply(0.10))
+  .add(ecoN.multiply(0.05))
+  .rename('CopperProxy').clamp(0,1);
+
+var NickelProxy = IOI.multiply(0.15)
+  .add(Clay.multiply(0.20))
+  .add(AST_Iron.multiply(0.20))
+  .add(magAbs.multiply(0.20))
+  .add(slope.multiply(0.10))
+  .add(gediRh100.multiply(0.10))
+  .rename('NickelProxy').clamp(0,1);
+
+var IronProxy = IOI.multiply(0.10)
+  .add(Clay.multiply(0.10))
+  .add(AST_Iron.multiply(0.30))
+  .add(magAbs.multiply(0.30))
+  .add(slope.multiply(0.05))
+  .add(gediRh100.multiply(0.10))
+  .rename('IronProxy').clamp(0,1);
+
+// Display proxies
+Map.addLayer(GoldProxy, {min:0,max:1,palette:['white','yellow','orange','red']}, 'Gold Potential');
+Map.addLayer(SilverProxy, {min:0,max:1,palette:['white','silver','gray','blue']}, 'Silver Potential');
+Map.addLayer(PlatinumProxy, {min:0,max:1,palette:['white','green','blue','purple']}, 'Platinum Potential');
+Map.addLayer(CopperProxy, {min:0,max:1,palette:['white','orange','red']}, 'Copper Potential');
+Map.addLayer(NickelProxy, {min:0,max:1,palette:['white','brown','red','black']}, 'Nickel Potential');
+Map.addLayer(IronProxy, {min:0,max:1,palette:['white','yellow','brown','red']}, 'Iron Potential');
+
+// -----------------------------
+// 5) Hotspot extraction per-metal (safe & limited)
+//    -> For each metal: mask = proxy > threshold, reduceToVectors (polygons)
+//    -> compute centroid lon/lat, area (m2), estimated depth (heuristic), volume proxy
+// -----------------------------
+function extractHotspotsFromProxy(proxyImg, proxyName, threshold, maxFeatures) {
+  threshold = threshold || 0.7; // default threshold
+  maxFeatures = maxFeatures || 200; // safety limit
+  var mask = proxyImg.gt(threshold).selfMask();
+  // reduce to polygons for entire Philippines AOI
+  var vectors = mask.reduceToVectors({
+    geometry: ph.geometry(),
+    scale: 30,
+    geometryType: 'polygon',
+    eightConnected: true,
+    labelProperty: 'mask',
+    maxPixels: 1e13
   });
-var ls = ee.Image(landsatCol.median()).clip(PH);
+  // if vectors empty return empty collection
+  vectors = ee.FeatureCollection(ee.Algorithms.If(vectors.size().gt(0), vectors, ee.FeatureCollection([])));
 
-// Sentinel-2 SR
-var s2col = ee.ImageCollection('COPERNICUS/S2_SR').filterBounds(PH).filterDate('2019-01-01','2025-12-31');
-var s2 = ee.Image(s2col.median()).clip(PH);
+  // Enrich features and compute attributes
+  var enriched = vectors.map(function(f){
+    var geom = f.geometry();
+    var meanVal = ee.Number(proxyImg.reduceRegion({
+      reducer: ee.Reducer.mean(),
+      geometry: geom,
+      scale: 30,
+      maxPixels: 1e9
+    }).get(proxyName));
+    meanVal = ee.Number(ee.Algorithms.If(meanVal, meanVal, 0));
 
-// SRTM DEM
-var srtm = ee.Image("USGS/SRTMGL1_003").clip(PH);
+    // mean magAbs and slope inside region
+    var meanMag = ee.Number(magAbs.reduceRegion({reducer: ee.Reducer.mean(), geometry: geom, scale: 100, maxPixels:1e9}).get('EMAG2_placeholder'));
+    // magAbs band name depends: if original EMAG2 used it's 'emag2' maybe - handle both:
+    meanMag = ee.Number(ee.Algorithms.If(meanMag, meanMag, ee.Number(magAbs.reduceRegion({reducer: ee.Reducer.mean(), geometry: geom, scale: 100, maxPixels:1e9}).values().get(0)).divide(1) || 0));
 
-// MODIS LST (as thermal proxy) - use 8-day product aggregated
-var modisLST = ee.ImageCollection("MODIS/006/MOD11A2")
-  .filterBounds(PH).filterDate('2018-01-01','2025-12-31')
-  .select('LST_Day_1km').mean().multiply(0.02).clip(PH); // scale factor 0.02 -> Kelvin
+    var meanSlope = ee.Number(slope.reduceRegion({reducer: ee.Reducer.mean(), geometry: geom, scale: 100, maxPixels:1e9}).get('slope_norm'));
+    meanSlope = ee.Number(ee.Algorithms.If(meanSlope, meanSlope, 0));
 
-// VIIRS nightlights (anthropogenic / thermal proxy)
-var viirs = ee.ImageCollection("NOAA/VIIRS/DNB/MONTHLY_V1/VCMSLCFG")
-  .filterBounds(PH).filterDate('2015-01-01','2025-12-31').median().clip(PH);
+    // Depth estimator (heuristic): base*(1 - meanMag)*(1 + slope/10)
+    var base = 60.0;
+    var depth = ee.Number(base).multiply(ee.Number(1).subtract(meanMag)).multiply(ee.Number(1).add(meanSlope.divide(10)));
+    depth = depth.max(5).min(2000);
 
-// GRACE/SMAP (coarse hydrology proxies) - use if available
-var grace = ee.ImageCollection("NASA/GRACE/MASS_GRIDS")
-  .filterBounds(PH).filterDate('2002-01-01','2020-12-31').mean().clip(PH);
-var smap = ee.ImageCollection("NASA_USDA/HSL/SMAP_soil_moisture").filterBounds(PH).mean().clip(PH);
+    // area (m2)
+    var area_m2 = ee.Number(geom.area());
+    // volume proxy = area * depth * meanVal (probabilistic)
+    var volume_m3 = area_m2.multiply(depth).multiply(meanVal);
 
-// Try optional datasets (GEDI, ECOSTRESS, EMIT) - only add when present
-var gediCol = ee.ImageCollection("NASA/GEDI/GEDI02_A_002_MONTHLY");
-var gedi = ee.Image(ee.Algorithms.If(gediCol.size().gt(0), gediCol.median().clip(PH), ee.Image(0)));
+    // centroid coords
+    var centroid = geom.centroid(1).coordinates();
+    var lon = centroid.get(0);
+    var lat = centroid.get(1);
 
-var ecoLSTcol = ee.ImageCollection("NASA/ECOSTRESS/VIIRS_LANDSURF_TEMP"); // alternative ECOSTRESS naming
-var ecoLST = ee.Image(ee.Algorithms.If(ecoLSTcol.size().gt(0), ecoLSTcol.median().clip(PH), ee.Image(0)));
-
-// -----------------------------
-// 2) Compute spectral bands (safe select from Landsat median)
-// -----------------------------
-var SR_B2 = safeSelect(ls, 'SR_B2'); // blue
-var SR_B3 = safeSelect(ls, 'SR_B3'); // green
-var SR_B4 = safeSelect(ls, 'SR_B4'); // red
-var SR_B5 = safeSelect(ls, 'SR_B5'); // NIR
-var SR_B6 = safeSelect(ls, 'SR_B6'); // SWIR1
-var SR_B7 = safeSelect(ls, 'SR_B7'); // SWIR2
-
-// -----------------------------
-// 3) Mineral proxies (heuristic, normalized 0..1). Colors assigned per mineral.
-// -----------------------------
-// Gold (hydrothermal alteration / iron oxide contrast + SWIR)
-var gold = norm01(SR_B4.subtract(SR_B3).divide(SR_B4.add(SR_B3).add(1e-6))).rename('GoldProxy');
-Map.addLayer(gold, {min: -0.3, max: 0.5, palette: ['black','gold']}, 'Gold Proxy (gold)');
-
-// Silver (silicate/carbonate signal proxy)
-var silver = norm01(SR_B5.subtract(SR_B7).divide(SR_B5.add(SR_B7).add(1e-6))).rename('SilverProxy');
-Map.addLayer(silver, {min:-0.3, max:0.5, palette:['black','silver']}, 'Silver Proxy (silver)');
-
-// Copper
-var copper = norm01(SR_B6.subtract(SR_B5).divide(SR_B6.add(SR_B5).add(1e-6))).rename('CopperProxy');
-Map.addLayer(copper, {min:-0.3, max:0.5, palette:['black','orange']}, 'Copper Proxy (orange)');
-
-// Nickel / Cobalt proxy (magmatic/ultramafic signature often in SWIR+NIR)
-var nickel = norm01(SR_B2.subtract(SR_B3).divide(SR_B2.add(SR_B3).add(1e-6))).rename('NickelProxy');
-Map.addLayer(nickel, {min:-0.3, max:0.5, palette:['black','green']}, 'Nickel Proxy (green)');
-
-// Platinum (proxy via combined SWIR signals)
-var platinum = norm01(SR_B7.subtract(SR_B6).divide(SR_B7.add(SR_B6).add(1e-6))).rename('PlatinumProxy');
-Map.addLayer(platinum, {min:-0.3, max:0.5, palette:['black','violet']}, 'Platinum Proxy (violet)');
-
-// Zinc
-var zinc = norm01(SR_B3.subtract(SR_B5).divide(SR_B3.add(SR_B5).add(1e-6))).rename('ZincProxy');
-Map.addLayer(zinc, {min:-0.3, max:0.5, palette:['black','blue']}, 'Zinc Proxy (blue)');
-
-// Iron (iron-oxide index)
-var iron = norm01(SR_B4.subtract(SR_B3).divide(SR_B4.add(SR_B3).add(1e-6))).rename('IronProxy');
-Map.addLayer(iron, {min:-0.3, max:0.5, palette:['black','red']}, 'Iron Proxy (red)');
-
-// REE (approx) - we use ASTER bands if available, else use composite EM proxies
-var asterImg = ee.Image(ee.Algorithms.If(asterCol.size().gt(0), asterCol.median().clip(PH), ee.Image(0)));
-var ree = norm01(safeSelect(asterImg, 'B06')).rename('REEProxy'); // placeholder use ASTER band
-Map.addLayer(ree, {min:0, max:1, palette:['black','cyan']}, 'REE Proxy (cyan)');
-
-// -----------------------------
-// 4) Energy proxies
-// -----------------------------
-// Thermal energy (MODIS LST)
-var thermal = norm01(modisLST).rename('ThermalEnergy');
-Map.addLayer(modisLST, {min:250, max:320, palette:['darkblue','yellow','red']}, 'MODIS LST (thermal)');
-
-// Oil/Gas heuristic: SWIR contrast
-var oilgas = norm01(SR_B6.add(SR_B7).divide(SR_B4.add(SR_B5).add(1e-6))).rename('OilGasProxy');
-Map.addLayer(oilgas, {min:0, max:1, palette:['purple','white','brown']}, 'Oil/Gas Proxy (brown)');
-
-// Geothermal (thermal + terrain + LST anomalies using ECOSTRESS if present)
-var geo = norm01(thermal.add(norm01(ee.Image(ecoLST))).multiply(0.5)).rename('GeothermalProxy');
-Map.addLayer(geo, {min:0, max:1, palette:['white','orange','red']}, 'Geothermal Proxy (orange)');
-
-// -----------------------------
-// 5) Composite / MegaFusion map (weighted)
-// -----------------------------
-var MegaFusion = ee.Image(0)
-  .add(gold.multiply(0.20))
-  .add(silver.multiply(0.12))
-  .add(copper.multiply(0.12))
-  .add(nickel.multiply(0.08))
-  .add(platinum.multiply(0.05))
-  .add(zinc.multiply(0.05))
-  .add(iron.multiply(0.10))
-  .add(ree.multiply(0.08))
-  .add(oilgas.multiply(0.12))
-  .add(geo.multiply(0.08))
-  .rename('MegaFusion');
-
-Map.addLayer(MegaFusion, {min:0, max:1, palette:['white','yellow','orange','red']}, 'Mega Fusion (combined)');
-
-// -----------------------------
-// 6) Hotspot extraction (centroid points with attributes)
-//    - Threshold the MegaFusion map and produce centroids per cluster
-// -----------------------------
-var threshold = 0.6;
-var mask = MegaFusion.gt(threshold);
-
-var hotspots = mask.updateMask(mask).reduceToVectors({
-  geometry: PH,
-  geometryType: 'centroid',
-  scale: 30,
-  eightConnected: true,
-  labelProperty: 'mask',
-  maxPixels: 1e13
-});
-
-var hotspotsEnriched = hotspots.map(function(f){
-  var geom = f.geometry();
-  var lon = geom.centroid().coordinates().get(0);
-  var lat = geom.centroid().coordinates().get(1);
-
-  var meanMega = MegaFusion.reduceRegion({reducer: ee.Reducer.mean(), geometry: geom, scale: 30, maxPixels: 1e13}).get('MegaFusion');
-  var meanGold = gold.reduceRegion({reducer: ee.Reducer.mean(), geometry: geom, scale: 30, maxPixels: 1e13}).get('GoldProxy');
-  var elev = srtm.reduceRegion({reducer: ee.Reducer.mean(), geometry: geom, scale: 30, maxPixels: 1e13}).get('elevation');
-
-  // heuristic depth estimator: shallower where magnetic/gradient high - but we use elevation as placeholder
-  var depth = ee.Number(50).multiply(ee.Number(1).subtract(ee.Number(0))); // placeholder
-
-  // area + volume proxies
-  var pixelCount = mask.updateMask(mask).reduceRegion({reducer: ee.Reducer.sum(), geometry: geom, scale:30, maxPixels:1e13}).values().get(0);
-  pixelCount = ee.Number(pixelCount || 1);
-  var area_m2 = pixelCount.multiply(900); // 30x30
-  var volume_m3 = area_m2.multiply(depth);
-
-  return f.set({
-    'lon': lon,
-    'lat': lat,
-    'Mean_MegaFusion': meanMega,
-    'Mean_Gold': meanGold,
-    'elevation_m': elev,
-    'Estimated_depth_m': depth,
-    'Area_m2': area_m2,
-    'Volume_proxy_m3': volume_m3,
-    'Datasets': 'Landsat,Sentinel2,ASTER,SRTM,MODIS,VIIRS,SMAP,GRACE'
+    return f.set({
+      'metal': proxyName,
+      'meanVal': meanVal,
+      'threshold': threshold,
+      'area_m2': area_m2,
+      'depth_m': depth,
+      'volume_proxy_m3': volume_m3,
+      'lon': lon,
+      'lat': lat
+    });
   });
-});
 
-Map.addLayer(hotspotsEnriched, {color:'red'}, 'Hotspot centroids (threshold 0.6)');
-print('Hotspots sample (first 50):', hotspotsEnriched.limit(50));
+  // sort by meanVal descending and limit to maxFeatures
+  var top = enriched.sort('meanVal', false).limit(maxFeatures);
+  return top;
+}
+
+// Configure metals to extract
+var metals = [
+  {img: GoldProxy, name: 'GoldProxy', threshold: 0.7},
+  {img: SilverProxy, name: 'SilverProxy', threshold: 0.7},
+  {img: PlatinumProxy, name: 'PlatinumProxy', threshold: 0.7},
+  {img: CopperProxy, name: 'CopperProxy', threshold: 0.7},
+  {img: NickelProxy, name: 'NickelProxy', threshold: 0.7},
+  {img: IronProxy, name: 'IronProxy', threshold: 0.7}
+];
+
+// Build a combined Hotspots FeatureCollection (top N per metal)
+var allHotspotsList = metals.map(function(m) {
+  return extractHotspotsFromProxy(m.img, m.name, m.threshold, 200);
+});
+// Flatten list of collections into one FeatureCollection
+var allHotspots = ee.FeatureCollection(ee.List(allHotspotsList).iterate(function(fc, acc){
+  acc = ee.FeatureCollection(acc);
+  return acc.merge(ee.FeatureCollection(fc));
+}, ee.FeatureCollection([])));
+
+Map.addLayer(allHotspots.style({color:'red'}), {}, 'All Metal Hotspots (sample top clusters)');
+print('Hotspots sample (first 50):', allHotspots.limit(50));
 
 // -----------------------------
-// 7) Export examples (run the Tasks panel to start)
+// 6) Exports
+//    - For safety: export hotspot vectors (limited) and raster (coarsened if needed).
+//    - You must run these Export tasks from the Tasks tab in the Code Editor (click Run there).
 // -----------------------------
-Export.image.toDrive({
-  image: MegaFusion,
-  description: 'PH_MegaFusion_Map',
-  folder: 'GEE_Exports',
-  fileNamePrefix: 'PH_MegaFusion',
-  region: PH,
-  scale: 30,
-  maxPixels: 1e13
-});
 
+// Export hotspots (all metals) — CSV to Drive
 Export.table.toDrive({
-  collection: hotspotsEnriched,
-  description: 'PH_Hotspots_Proxies',
+  collection: allHotspots,
+  description: 'PH_Metals_Hotspots_top',
   folder: 'GEE_Exports',
-  fileNamePrefix: 'PH_Hotspots',
+  fileNamePrefix: 'Philippines_Metal_Hotspots_top',
   fileFormat: 'CSV'
 });
 
-// Done
-print('Gold, metals, energy proxies added. Use Inspector (top-right) to click map pixels and read band values.');
+// For each metal export a moderate-resolution raster (here 100m) to reduce size.
+// Increase scale to 30m only if you understand export will be large.
+metals.forEach(function(m){
+  Export.image.toDrive({
+    image: m.img,
+    description: m.name + '_Potential_PH_100m',
+    folder: 'GEE_Exports',
+    fileNamePrefix: m.name + '_Potential_PH_100m',
+    region: ph.geometry().bounds(),
+    scale: 100,
+    maxPixels: 1e13,
+    crs: 'EPSG:4326'
+  });
+});
+
+// -----------------------------
+// 7) Guidance: Inspecting & using outputs
+// -----------------------------
+print('--- SUMMARY & NEXT STEPS ---');
+print('1) The map shows proxy layers for Gold, Silver, Platinum, Copper, Nickel, Iron (0..1 scale).');
+print('2) Use the Inspector tool (top-right of Map window) to click on any point to read layer pixel values.');
+print('3) Hotspots table (exported) contains centroid lon/lat, area_m2, depth_m (heuristic), and volume_proxy_m3.');
+print('4) To get exact coordinates: Inspect a hotspot, or download the CSV and open in QGIS/Excel.');
+print('5) Validate: PROXIES -> field sampling (ICP-MS) and ground geophysics are required before any resource claims.');
+print('Notes: Some datasets (GEDI / ECOSTRESS / EMAG2 / EMIT) may be unavailable to your account; the script prints missing-asset warnings and uses safe placeholders in that case.');
