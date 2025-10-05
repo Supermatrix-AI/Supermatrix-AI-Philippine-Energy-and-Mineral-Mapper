@@ -1,1 +1,135 @@
+Slide 1 – Project Overview
 
+Title: Supermatrix-AI: Philippine Energy & Mineral Mapper
+
+Content:
+
+Purpose: Map metal & energy proxies (Gold, Silver, Platinum, Copper, Nickel, Iron) across the Philippines
+
+Data Sources: NASA + partner datasets (Landsat, Sentinel-2, ASTER, EMIT, VIIRS, GRACE, SMAP, SRTM, EMAG2, GEDI, ECOSTRESS)
+
+Outputs: Proxy maps, hotspot vectors, raster exports, metadata (area, depth, volume)
+
+Note: All outputs are proxies – field validation required
+
+Visual Suggestion:
+
+Map of Philippines as AOI with layered satellite imagery
+
+Slide 2 – Data & Assets
+
+Title: Earth Observation Datasets Used
+
+Content:
+
+Raster Sources: Landsat 8/9, Sentinel-2, ASTER, EMIT, SRTM, ALOS, EMAG2
+
+Global Observations: VIIRS nightlights, GRACE gravity, SMAP soil moisture
+
+Forest & Topography: GEDI canopy height, ECOSTRESS LST/ET, slope from DEMs
+
+Safe Loaders: Scripts handle missing datasets via placeholders
+
+Visual Suggestion:
+
+Table or icon grid showing each dataset with icon + date range
+
+Slide 3 – Spectral Indices
+
+Title: Spectral Indices for Metal Proxies
+
+Content:
+
+IOI (Iron Oxide Index): Landsat Red & Green bands
+
+Clay Proxy: SWIR bands (Landsat / ASTER)
+
+Carbonate Proxy: NIR/SWIR bands
+
+ASTER Iron: (B2–B1)/(B2+B1) scaled to 0–1
+
+Normalization ensures safe [0,1] mapping for all indices
+
+Visual Suggestion:
+
+2–3 small maps showing IOI, Clay, ASTER Iron layers across Philippines
+
+Slide 4 – Metal Proxy Computation
+
+Title: Heuristic Proxy Mapping
+
+Content:
+
+Linear combination of indices and geophysical parameters:
+
+GoldProxy = IOI*0.25 + Clay*0.20 + AST_Iron*0.10 + magAbs*0.20 + slope*0.05 + GEDI*0.10 + ECOSTRESS*0.10
+
+Similar weighted formulas for Silver, Platinum, Copper, Nickel, Iron
+
+Output: normalized [0,1] proxy layers
+
+Visual Suggestion:
+
+Color gradient maps for Gold, Silver, and Iron potential zones
+
+Slide 5 – Hotspot Extraction
+
+Title: Hotspot Identification & Attributes
+
+Content:
+
+Thresholding: proxy > 0.7 → hotspot polygons
+
+Attributes per hotspot:
+
+metal, meanVal, area_m2, depth_m (heuristic), volume_proxy_m3, lon/lat
+
+Top clusters extracted for each metal for mapping & export
+
+Visual Suggestion:
+
+Map with red polygons overlaid on proxy raster
+
+Table snippet showing first 5–10 hotspots with area & depth
+
+Slide 6 – Export & Analysis Workflow
+
+Title: Export & Analyze Metal Proxy Data
+
+Content:
+
+Hotspot Table Export (CSV) – centroid, area, depth, volume, metal type
+
+Raster Export (GeoTIFF) – 100 m resolution, CRS EPSG:4326
+
+Google Earth Engine Inspector – interactive pixel-level checks
+
+Notes:
+
+Outputs are proxies only, field validation required
+
+Missing datasets handled with safe placeholders
+
+Visual Suggestion:
+
+Left: GEE map screenshot
+
+Right: CSV table + GeoTIFF preview in QGIS
+
+Slide 7 – Next Steps & Validation
+
+Title: Validation & Deployment Plan
+
+Content:
+
+Ground Truth: ICP-MS sampling, geophysics surveys
+
+Integration: QGIS / ArcGIS for spatial analysis & overlay
+
+Refinement: Update weights and thresholds based on field data
+
+Applications: Mining exploration, energy planning, hazard assessment
+
+Visual Suggestion:
+
+Flowchart: Proxy map → Hotspot extraction → Field validation → Final resource map
