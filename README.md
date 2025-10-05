@@ -15,3 +15,11 @@ AI-assisted mapper that fuses NASA & partner Earth Observation datasets to creat
 
 ## Notes
 All outputs are proxies. Field validation is required before any operational use.
+
+## 🌐 Project Demonstration
+Watch the short demo of *Supermatrix-AI: Philippine Energy & Mineral Mapper* below:  
+🔗 [Project Demo (Google Drive)](https://your-public-demo-link)  
+📘 [NASA Space Apps Challenge Submission Page](https://www.spaceappschallenge.org)  
+
+## 🛰️ About
+This project was developed for the *2025 NASA Space Apps Challenge*, combining NASA Earth datasets with AI-driven geospatial analysis to map and predict energy and mineral resources in the Philippines.
