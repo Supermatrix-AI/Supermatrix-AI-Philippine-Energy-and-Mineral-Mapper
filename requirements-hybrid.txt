@@ -1,0 +1,10 @@
+langchain
+langgraph
+crewai
+faiss-cpu
+openai
+anthropic
+arize-phoenix
+agentops
+tavily-python
+prometheus-client
