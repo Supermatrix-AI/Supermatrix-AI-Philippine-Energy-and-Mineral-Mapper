@@ -1,0 +1,9 @@
+{
+  "execution_control": {"option": "local", "nodes": 1, "memory": 16},
+  "log_directory": "vault/reV_runs/logs",
+  "analysis_years": [2018, 2019, 2020],
+  "site_data": {"project_points": "configs/rev/project_points.csv"},
+  "technology": "landbased",
+  "wind_tech": {"turbine_type": "LandBased_3.5MW_110m"},
+  "output_request": ["cf_mean", "cf_profile", "windspeed_100m"]
+}
