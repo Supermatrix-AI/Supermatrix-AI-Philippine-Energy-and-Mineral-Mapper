@@ -138,6 +138,7 @@ celerybeat.pid
 .env
 .envrc
 .venv
+.venv_phemm/
 env/
 venv/
 ENV/
@@ -205,3 +206,10 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+# PHEMM generated artifacts
+ecosystem/phil_energy_mineral_mapper/vault/*
+!ecosystem/phil_energy_mineral_mapper/vault/README.md
+!ecosystem/phil_energy_mineral_mapper/vault/*/
+!ecosystem/phil_energy_mineral_mapper/vault/*/.gitkeep
+cache/
+ecosystem/phil_energy_mineral_mapper/cache/

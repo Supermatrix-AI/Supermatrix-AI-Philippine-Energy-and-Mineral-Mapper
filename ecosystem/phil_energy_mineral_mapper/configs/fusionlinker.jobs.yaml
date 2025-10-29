@@ -1,0 +1,61 @@
+version: 1
+pipeline: PHEMM_SUPPLYCURVE_GEO
+steps:
+  - id: aoi_build
+    cwd: ecosystem/phil_energy_mineral_mapper
+    run: python scripts/fetch_ph_aoi.py
+    out: vault/aoi/
+
+  - id: rev_solar
+    cwd: ecosystem/phil_energy_mineral_mapper/modules/reV
+    run: >
+      python -m reV.supply_curve.cli_sc_point_extractor
+      -o ../../vault/reV_runs/solar_points.csv
+      -p ../../configs/rev/project_points.csv
+    after:
+      - id: run_solar_gen
+        cwd: ecosystem/phil_energy_mineral_mapper/modules/reV
+        run: >
+          python -m reV.generation.cli_generation
+          -c ../../configs/rev/rev_solar_job.json
+        out: ../../vault/reV_runs/solar/
+
+  - id: rev_wind
+    cwd: ecosystem/phil_energy_mineral_mapper/modules/reV
+    run: >
+      python -m reV.supply_curve.cli_sc_point_extractor
+      -o ../../vault/reV_runs/wind_points.csv
+      -p ../../configs/rev/project_points.csv
+    after:
+      - id: run_wind_gen
+        cwd: ecosystem/phil_energy_mineral_mapper/modules/reV
+        run: >
+          python -m reV.generation.cli_generation
+          -c ../../configs/rev/rev_wind_job.json
+        out: ../../vault/reV_runs/wind/
+
+  - id: geophires_leyte
+    cwd: ecosystem/phil_energy_mineral_mapper/modules/GEOPHIRES-X
+    run: >
+      python GEOPHIRES_X.py ../../configs/geophires/leyte_tongonan.txt
+    out: ../../vault/geophires_runs/leyte/
+
+  - id: geophires_negros
+    cwd: ecosystem/phil_energy_mineral_mapper/modules/GEOPHIRES-X
+    run: >
+      python GEOPHIRES_X.py ../../configs/geophires/negros_palinpinon.txt
+    out: ../../vault/geophires_runs/negros/
+
+  - id: geophires_mindoro
+    cwd: ecosystem/phil_energy_mineral_mapper/modules/GEOPHIRES-X
+    run: >
+      python GEOPHIRES_X.py ../../configs/geophires/mindoro_occidental.txt
+    out: ../../vault/geophires_runs/mindoro/
+
+publish:
+  - match: vault/**/*.csv
+    as: dataset
+  - match: vault/**/*.json
+    as: metadata
+  - match: vault/**/*.tif
+    as: raster

@@ -1,0 +1,9 @@
+{
+  "execution_control": {"option": "local", "nodes": 1, "memory": 16},
+  "log_directory": "vault/reV_runs/logs",
+  "analysis_years": [2018, 2019, 2020],
+  "site_data": {"project_points": "configs/rev/project_points.csv"},
+  "technology": "pvwattsv7",
+  "solar_tech": {"system_capacity": 1000, "tilt": 10, "azimuth": 180},
+  "output_request": ["cf_mean", "cf_profile", "ghi_mean"]
+}

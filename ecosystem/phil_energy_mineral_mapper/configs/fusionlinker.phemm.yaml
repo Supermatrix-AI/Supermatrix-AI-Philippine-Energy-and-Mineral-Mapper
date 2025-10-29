@@ -1,0 +1,33 @@
+version: 1
+app: PH-ENERGY-MINERAL-MAPPER
+notes:
+  - Clone the upstream research repositories into the matching directories under `modules/` before activating any route.
+  - Commands below assume the third-party tools are installed inside the local environment.
+routes:
+  - name: reV_solar_wind
+    entry: modules/reV
+    command: python -m reV.config --help
+    out: vault/reV_runs/
+  - name: geophires_geoLCOE
+    entry: modules/GEOPHIRES-X
+    command: python GEOPHIRES_X.py --help
+    out: vault/geophires_runs/
+  - name: gempy_model
+    entry: modules/gempy
+    command: python - <<PY
+import gempy as gp; print("GemPy ok:", gp.__version__)
+PY
+    out: vault/gempy_models/
+  - name: aster_indices_gee
+    entry: modules/ASTER_pre
+    command: python - <<PY
+print("ASTER indices scaffold ok (see notebooks/ASTER_PHEMM_demo.ipynb)")
+PY
+    out: vault/aster_exports/
+  - name: geothermal_osr_ml
+    entry: modules/geothermal_osr
+    command: echo "See notebooks/OSR_PHEMM_demo.ipynb"
+    out: vault/osr_ml/
+vaultsync:
+  root: vault/
+  export_formats: [csv, geojson, tif]
