@@ -62,3 +62,4 @@ echo "Updating STAC catalog at ${VAULT_DIR}/stac_catalog.json"
 echo "$(date +'%Y-%m-%d %H:%M:%S') — Ingestion run completed" >> "${METADATA_LOG}"
 
 echo "Ingestion complete. Please review ${METADATA_LOG} for details."
+
