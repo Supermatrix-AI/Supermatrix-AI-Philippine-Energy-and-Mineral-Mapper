@@ -48,6 +48,13 @@ python data/scripts/mineral_ai_preprocessor.py sample \
   --output-csv data/demo/mindanao_samples.csv
 ```
 
+> **Authentication prerequisite**
+>
+> The CLI talks directly to the Google Earth Engine API. You must authenticate with
+> `earthengine authenticate` (or configure a service-account key via `GOOGLE_APPLICATION_CREDENTIALS`)
+> from an environment where the [Google Cloud SDK (`gcloud`)](https://cloud.google.com/sdk/docs/install) is available.
+> Without these credentials the script will raise `gcloud command not found` during `ee.Authenticate()` and no samples will be generated.
+
 Key capabilities:
 
 * Uses GAUL administrative boundaries (levels 0–2) or custom AOIs (GeoJSON / EE asset).
